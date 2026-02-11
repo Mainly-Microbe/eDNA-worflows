@@ -31,3 +31,5 @@ qiime feature-table filter-samples \
   --o-filtered-table filtered-cutoff-table    # if cutoff=0 then no filtering and there will be a "no filtering requested" error
 
 cp filtered-cutoff-table.qza ancom
+
+cp rarefied-table.qza rooted-tree.qza filt-taxonomy.qza metadata.tsv R     # grabs everything for phyloseq or microeco
