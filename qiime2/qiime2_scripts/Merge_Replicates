@@ -1,0 +1,14 @@
+# the goal of this script is to merge replicates
+
+qiime feature-table group \
+    --i-table table.qza \
+    --m-metadata-file metadata.tsv \
+    --m-metadata-column Replicate \
+    --p-mode mean-ceiling \
+    --p-axis sample \
+    --o-grouped-table merged-final-table.qza
+
+# script can be adopted 
+# metadata file must have an extra column with the same named entered for each replicate you want to merge together
+# p-mode mean ceiling averages it
+# p-axis sample averages it by the same not by the taxa 
