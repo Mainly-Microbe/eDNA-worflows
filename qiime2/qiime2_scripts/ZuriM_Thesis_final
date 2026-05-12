@@ -1,0 +1,949 @@
+library(qiime2R) 
+library(ggplot2)
+library(phyloseq)
+library(dplyr)
+library(vegan)
+library(ggpubr)
+library(colorspace)
+library(tidyverse)
+library(RColorBrewer)
+library(MicEco)
+library(paletteer)
+library(microeco)
+library(file2meco)
+library(ranacapa)
+library(plyr)
+library(microbiome)
+library(FSA)
+library(compositions)
+library(otuSummary)
+library(reshape2) # has the melt funct  ion, which I use to wrangle data
+library(psych)
+library(ANCOMBC)
+
+
+set.seed(347)
+
+# Set Up # 
+
+physeq<-qza_to_phyloseq(features="/Users/zurimurph/Desktop/Ocean_Lab/raw_data/phyloseq/rarefied-final-table.qza", tree="/Users/zurimurph/Desktop/Ocean_Lab/raw_data/phyloseq/rooted-tree.qza", taxonomy="/Users/zurimurph/Desktop/Ocean_Lab/raw_data/phyloseq/filt-taxonomy.qza", metadata = "/Users/zurimurph/Desktop/Ocean_Lab/raw_data/phyloseq/metadata_merged.tsv")
+physeq <- subset_taxa(physeq, Phylum != "Eukaryota")
+print(physeq)
+setwd("/Users/zurimurph/Desktop/Ocean_Lab/code/R_Outputs/final")
+# phyloseq-class experiment-level object
+# otu_table()   OTU Table:         [ 1575 taxa and 9 samples ]
+# sample_data() Sample Data:       [ 9 samples by 6 sample variables ]
+# tax_table()   Taxonomy Table:    [ 1575 taxa by 7 taxonomic ranks ]
+# phy_tree()    Phylogenetic Tree: [ 1575 tips and 1440 internal nodes ]
+
+meco <- phyloseq2meco(physeq)
+print(meco)
+
+# microtable-class object:
+# sample_table have 9 rows and 6 columns
+# otu_table have 1575 rows and 9 columns
+# tax_table have 1575 rows and 7 columns
+# phylo_tree have 1575 tips
+
+theme_set(theme_bw())
+pal = "Set1"
+scale_colour_discrete <-  function(palname=pal, ...){
+  scale_colour_brewer(palette=palname, ...)
+}
+scale_fill_discrete <-  function(palname=pal, ...){
+  scale_fill_brewer(palette=palname, ...)
+}
+
+meco <- meco$cal_abund()
+mt_rare <- clone(meco) # clone data
+mt_rare$sample_sums() %>% range # show ranges 
+# [1] 5811 5816
+mt_rare$rarefy_samples(sample.size = 5811) # chose the lower number printed 
+# rarefied to 5811
+mt_rare$sample_sums() %>% range # check to make it worked
+
+mt_rare <- mt_rare$cal_alphadiv(PD = FALSE) # alpha diversity
+
+mt_rare <- mt_rare$cal_betadiv(unifrac = TRUE) # beta diversity
+mt_rare$filter_taxa(rel_abund = 0.0001) # filtered out taxa with less than a relative abundance of .01%
+# 446 features filtered based on the abundance for otu_table 
+
+print(mt_rare)
+
+# microtable-class object:
+# sample_table have 9 rows and 6 columns
+# otu_table have 1088 rows and 9 columns
+# tax_table have 1088 rows and 7 columns
+# phylo_tree have 1088 tips
+# Taxa abundance: calculated for Kingdom,Phylum,Class,Order,Family,Genus,Species 
+# Alpha diversity: calculated for Observed,Chao1,se.chao1,ACE,se.ACE,Shannon,Simpson,InvSimpson,Fisher,Pielou,Coverage 
+# Beta diversity: calculated for bray,jaccard,wei_unifrac,unwei_unifrac
+
+# add ASVs to table
+test <- clone(mt_rare)
+test$add_rownames2tax("ASV")
+# then we can calculate the relative abundance of ASV
+# for all taxonomic levels like commonly operation
+test$cal_abund()
+View(test$taxa_abund$ASV)
+# only ASV level
+test$cal_abund(select_cols = "ASV")
+View(test$taxa_abund$ASV)
+
+print(test)
+# microtable-class object:
+# sample_table have 9 rows and 6 columns
+# otu_table have 1088 rows and 9 columns
+# tax_table have 1088 rows and 8 columns
+# phylo_tree have 1088 tips
+# Taxa abundance: calculated for ASV 
+# Alpha diversity: calculated for Observed,Chao1,se.chao1,ACE,se.ACE,Shannon,Simpson,InvSimpson,Fisher,Pielou,Coverage 
+# Beta diversity: calculated for bray,jaccard,wei_unifrac,unwei_unifrac
+
+# venn diagram
+
+genera <- mt_rare$merge_taxa("Genus") # 139 genera
+season <- genera$merge_samples("Season")# merge samples as one community for each group
+
+venn <- trans_venn$new(season, ratio = "numratio") # create trans_venn object / ratio of asvs
+venn$plot_venn()
+
+venn <- trans_venn$new(season, ratio = "seqratio") # create trans_venn object / ratio of asvs
+venn$plot_venn()
+
+# alpha diversity
+
+alpha <- trans_alpha$new(dataset = mt_rare, group = "Season") # alpha diversity by Season
+head(alpha$data_stat)
+alpha$cal_diff(method = "KW") # Dunn's Kruskal Wallis when for paired groups when groups > 2
+head(alpha$res_diff) # returns the test with letters
+
+alpha$cal_diff(method = "KW", KW_dunn_letter = FALSE) # returns the test with p-value
+head(alpha$res_diff)
+write.csv(alpha$res_diff, "KW_alpha.csv", row.names = FALSE)
+
+alpha$cal_diff(method = "KW_dunn", KW_dunn_letter = FALSE) # returns the test with p-value
+head(alpha$res_diff)
+write.csv(alpha$res_diff, "KW_dunn_alpha.csv", row.names = FALSE)
+
+alpha <- trans_alpha$new(dataset = mt_rare, group = "Site") # alpha diversity by Season
+head(alpha$data_stat)
+alpha$cal_diff(method = "KW_dunn") # Dunn's Kruskal Wallis when for paired groups when groups > 2
+head(alpha$res_diff) # returns the test with letters
+
+alpha$cal_diff(method = "KW_dunn", KW_dunn_letter = FALSE) # returns the test with p-value
+head(alpha$res_diff)
+write.csv(alpha$res_diff, "KW_dunn_site_alpha.csv", row.names = FALSE)
+
+
+
+alpha$plot_alpha(measure = "Observed", y_increase = 0.3) # none are sig
+alpha$plot_alpha(measure = "Shannon", y_increase = 0.3) # none are sig
+alpha$plot_alpha(measure = "Simpson", y_increase = 0.3) # none are sig
+
+mt_rare$save_alphadiv(dirpath = "alpha_diversity")
+
+# beta diversity
+names(mt_rare$beta_diversity)
+# "bray"  "jaccard"  "wei_unifrac" "unwei_unifrac"
+
+wei_unifrac <- trans_beta$new(dataset = mt_rare, group = "Season", measure = "wei_unifrac")
+wei_unifrac$cal_ordination(method = "PCoA")
+class(wei_unifrac$res_ordination)
+wei_unifrac$plot_ordination(plot_color = "Season", plot_shape = "Site", plot_type = c("point", "ellipse"))
+
+wei_unifrac$cal_anosim(group = "Season", paired = TRUE)
+anosim_wei_unifrac <- wei_unifrac$res_anosim
+write_csv(anosim_wei_unifrac, file="anosim_wei_unifrac_season.csv")
+
+wei_unifrac$cal_anosim(group = "Site", paired = TRUE)
+anosim_wei_unifrac <- wei_unifrac$res_anosim
+write_csv(anosim_wei_unifrac, file="anosim_wei_unifrac_site.csv")
+
+
+bray <- trans_beta$new(dataset = mt_rare, group = "Season", measure = "bray")
+bray$cal_ordination(method = "PCoA")
+class(bray$res_ordination)
+bray$plot_ordination(plot_color = "Season", plot_shape = "Site", plot_type = c("point", "ellipse"))
+
+bray$cal_anosim(group = "Season", paired = TRUE)
+anosim_bray <- bray$res_anosim
+write_csv(anosim_bray, file="anosim_bray_season.csv")
+
+bray$cal_anosim(group = "Site", paired = TRUE)
+anosim_bray <- bray$res_anosim
+write_csv(anosim_bray, file="anosim_bray_site.csv")
+
+
+wei_unifrac$cal_manova(manova_all = FALSE, group = "Season", by_group = "Site")
+wei_unifrac$res_manova
+
+bray$cal_manova(manova_all = FALSE, group = "Season", by_group = "Site")
+bray$res_manova
+
+bray <- trans_beta$new(dataset = mt_rare, group = "Season", measure = "bray")
+bray$cal_manova(manova_all = FALSE)
+manova_bray <- bray$res_manova
+write_csv(manova_bray, file="manova_bray_season.csv")
+
+wei_unifrac <- trans_beta$new(dataset = mt_rare, group = "Season", measure = "wei_unifrac")
+wei_unifrac$cal_manova(manova_all = FALSE)
+manova_wei_unifrac <- wei_unifrac$res_manova
+write_csv(manova_wei_unifrac, file="manova_uni_wei_season.csv")
+
+bray$cal_manova(manova_set = "Season + Site")
+bray$res_manova
+
+# convert back to physeq
+
+physeq <- meco2phyloseq(test)
+
+# bar plot
+
+df <- sample_data(physeq) # check sample names
+
+order_szn <- c("Fall","Winter","Spring")
+df$Season <- factor(df$Season, levels = order_szn)
+sample_data(physeq) <- df
+
+phylum_data <-  microbiome::aggregate_taxa(physeq, "Phylum") # set to Phyla level
+abund <- ps_prune(phylum_data, min.reads = 75) # binds phyla with 75 reads or less
+# returned: 9 features grouped as 'Others' in the output
+
+names <- rownames(phylum_data@tax_table)
+
+taxa_data <-  microbiome::aggregate_taxa(abund, "Phylum") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+taxa_data <- taxa_data %>%
+  mutate(OTU = str_replace(OTU, "p__", ""),
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         unique = str_replace(unique, "p__",""))
+View(taxa_data)
+
+taxa_abund <- taxa_data %>%
+  dplyr::group_by(Season, Phylum) %>% # groups everything by Season and Phylum 
+  dplyr::summarise(Abundance = mean(Abundance, na.rm = TRUE), # then sums them
+                   .groups = "drop"
+  )
+View(taxa_abund)
+write_csv(taxa_abund, file = "phylum_abundance_bar.csv")
+
+
+order <- taxa_data$Phylum %>% unique()
+
+taxa_data$Phylum <- factor(taxa_data$Phylum, levels = order)
+
+taxa_data$Phylum <- fct_relevel(taxa_data$Phylum, "Unknown", after = Inf)
+taxa_data$Phylum <- fct_relevel(taxa_data$Phylum, "Ciliophora", after = 3)
+taxa_data$Phylum <- fct_relevel(taxa_data$Phylum, "Cryptophyceae", after = 2)
+
+p_col <- c(
+  "olivedrab", "chartreuse4","darkseagreen","darkslategray3","cyan3", "darkcyan", "dodgerblue",
+  "palegoldenrod", "darkgoldenrod1", "darkorange2",
+  "darksalmon", "tomato2",
+  "deeppink4", "darkmagenta","darkorchid",      
+  "darkslateblue", "brown4",
+  "azure4")
+
+
+bar <- taxa_data %>%
+  ggbarplot( x= "Site", 
+             y = "Abundance", # sequence abundance 
+             fill = "Phylum",
+             position = position_stack(),
+             legend = "right",
+             ylab = "Relative Abundances") +
+  ggtitle("Relative Abundance of Phyla Across Season") +
+  scale_fill_manual(values = p_col) + 
+  scale_y_continuous(expand = c(0, .01)) +
+  facet_grid(cols = vars(Season),     # create facets by factors in column `Location`.
+             scales = "free_x",
+             space = "free_x") +
+  guides(fill = guide_legend(byrow = FALSE)) + 
+  rotate_x_text(angle = 45) +           # rotate the x-axis labels
+  theme_bw() +                          # makes ggplots look better
+  theme(axis.title.x=element_blank(),   # remove the background grid
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+bar
+
+taxa_data_feed <- microbiome::transform(physeq, "compositional") %>%
+  phyloseq::psmelt(.)
+
+taxa_data_feed <- taxa_data_feed %>%
+  mutate(OTU = str_replace(OTU, "p__", ""),
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""))
+
+feed <- taxa_data_feed %>%
+  mutate(
+    trophic = case_when(
+      str_detect(Phylum, "Apicomplexa") ~ "heterotroph",
+      str_detect(Phylum, "Apusomonadidae") ~ "heterotroph",
+      str_detect(Phylum, "Arthropoda") ~ "heterotroph",
+      str_detect(Phylum, "Chlorophyta") ~ "autotroph",
+      str_detect(Phylum, "Ciliophora") ~ "heterotroph",
+      str_detect(Phylum, "Cryptophyceae") ~ "mixotroph",
+      str_detect(Phylum, "Diatomea") ~ "autotroph",
+      str_detect(Phylum, "Discoba") ~ "heterotroph",
+      str_detect(Phylum, "Kathablepharidae") ~ "heterotroph",
+      str_detect(Phylum, "Labyrinthulomycetes") ~ "saprotroph",
+      str_detect(Phylum, "MAST") ~ "heterotroph",
+      str_detect(Phylum, "Ochrophyta") ~ "autotroph",
+      str_detect(Phylum, "Pavlovophyceae") ~ "autotroph",
+      str_detect(Phylum, "Peronosporomycetes") ~ "saprotroph",
+      str_detect(Phylum, "Picozoa") ~ "heterotroph",
+      str_detect(Phylum, "Protalveolata") ~ "heterotroph",
+      str_detect(Phylum, "Prymnesiophyceae") ~ "mixotroph",
+      str_detect(Phylum, "Retaria") ~ "mixotroph",
+      str_detect(Phylum, "Rotifera") ~ "heterotroph",
+      str_detect(Phylum, "Amoebozoa") ~ "heterotroph",
+      str_detect(Phylum, "Cryptomycota") ~ "heterotroph",
+      str_detect(Phylum, "Chytridiomycota") ~ "heterotroph",
+      str_detect(Phylum, "Cercozoa") ~ "heterotroph",
+      str_detect(Order, "Imbricatea") ~ "heterotroph",
+      str_detect(Order, "Novel_Clade_2") ~ "heterotroph",
+      str_detect(Order, "Ebriacea") ~ "heterotroph",
+      str_detect(Order, "Thecofilosea") ~ "heterotroph",
+      str_detect(Order, "Vampyrellidae") ~ "heterotroph",
+      str_detect(Order, "Ebriacea") ~ "heterotroph",
+      str_detect(Order, "Diplonemea") ~ "heterotroph",
+      str_detect(Order, "Heteronematina") ~ "mixotroph",
+      str_detect(Order, "Neobodonida") ~ "heterotroph",
+      str_detect(Order, "Prokinetoplastina") ~ "heterotroph",
+      str_detect(Family, "Chlorarachniophyta") ~ "mixotroph",
+      str_detect(Family, "Protaspidae") ~ "heterotroph",
+      str_detect(Genus, "Sorodiplophrys") ~ "heterotroph",
+      str_detect(Genus, "Haplozoon") ~ "heterotroph",
+      str_detect(Species, "Gymnodinium_smaydae") ~ "mixotroph",
+      str_detect(Species, "Heterocapsa_triquetra") ~ "mixotroph",
+      str_detect(Species, "Karenia_mikimotoi") ~ "mixotroph",
+      str_detect(Species, "Leiocephalium_pseudosanguineum") ~ "autotroph",
+      str_detect(Species, "Paragymnodinium_shiwhaense") ~ "mixotroph",
+      str_detect(Species, "Paulsenella_vonstoschii") ~ "heterotroph", 
+      str_detect(Species, "Pheopolykrikos_hartmannii") ~ "mixotroph",
+      str_detect(Species, "Scrippsiella_trochoidea") ~ "mixotroph",
+      TRUE ~ "Unassigned" # control what everything else is 
+    )
+  ) 
+
+df <- sample_data(feed) # check sample names
+
+order_szn <- c("Fall","Winter","Spring")
+df$Season <- factor(df$Season, levels = order_szn)
+feed <- df
+
+feed_sum <- feed %>%
+  dplyr::group_by(Site, Season, trophic) %>% # groups everything with the same site, season and trophic structure together
+  dplyr::summarise(Abundance = sum(Abundance, na.rm = TRUE), # then sums them
+    .groups = "drop"
+  )
+
+feed_sum$trophic <- fct_relevel(feed_sum$trophic, "NA", after = Inf)
+
+feed_bar <- feed_sum %>%
+  ggbarplot( x= "Site", 
+             y = "Abundance", 
+             fill = "trophic",
+             position = position_stack(),
+             legend = "right",
+             ylab = "Relative Abundances") +
+  ggtitle("Relative Abundances of Trophic Feeding Styles") +
+  scale_fill_paletteer_d("unikn::pal_grau") + 
+  scale_y_continuous(expand = c(0,0)) +
+  facet_grid(cols = vars(Season),     # create facets by factors in column `Location`.
+             scales = "free_x",
+             space = "free_x") +
+  guides(fill = guide_legend(byrow = FALSE)) + 
+  rotate_x_text(angle = 45) +           # rotate the x-axis labels
+  theme_bw() +                          # makes ggplots look better
+  theme(axis.title.x=element_blank(),   # remove the background grid
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+feed_bar
+
+feed_count <- feed_sum %>%
+  dplyr::group_by(Season, trophic) %>%  # group by only phyla so I can see across sites and season
+  dplyr::summarise(Meanabu = mean(Abundance)) %>%  # Create a column called `Meanabu`
+  dplyr::filter(Meanabu > 0) %>%                  # filter out rows that have 0 abundance
+  dplyr::arrange(desc(Meanabu)) # sort abundances from high to low 
+
+write_csv(feed_count, file="trophic_freq_season.csv")
+
+# Freq of sequences across all sequences
+
+physeq<-qza_to_phyloseq(features="/Users/zurimurph/Desktop/Ocean_Lab/raw_data/phyloseq/rarefied-final-table.qza", tree="/Users/zurimurph/Desktop/Ocean_Lab/raw_data/phyloseq/rooted-tree.qza", taxonomy="/Users/zurimurph/Desktop/Ocean_Lab/raw_data/phyloseq/filt-taxonomy.qza", metadata = "/Users/zurimurph/Desktop/Ocean_Lab/raw_data/phyloseq/metadata_merged.tsv")
+physeq <- subset_taxa(physeq, Phylum != "Eukaryota")
+
+taxa_data_full <-  microbiome::aggregate_taxa(physeq, "Phylum") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.)
+
+total_count <- taxa_data_full %>%
+  dplyr::group_by(Phylum) %>%  # group by only phyla so I can see across sites and season
+  dplyr::summarise(Meanabu = mean(Abundance)) %>%  # Create a column called `Meanabu`
+  dplyr::filter(Meanabu > 0) %>%                  # filter out rows that have 0 abundance
+  dplyr::arrange(desc(Meanabu)) # sort abundances from high to low 
+
+write_csv(total_count, file="/Users/zurimurph/Desktop/Ocean_Lab/code/R_Outputs/final/total_freq.csv")
+
+family_abundance <- microbiome::aggregate_taxa(physeq, "Family") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.)
+
+family_abundance <- family_abundance %>%
+  dplyr::group_by(Season, Family) %>%  # group by only phyla so I can see across sites and season
+  dplyr::summarise(Meanabu = mean(Abundance)) %>%  # Create a column called `Meanabu`
+  dplyr::filter(Meanabu > 0) %>%                  # filter out rows that have 0 abundance
+  dplyr::arrange(desc(Meanabu))
+View(family_abundance)
+write_csv(family_abundance, file="family_abundance.csv")
+
+ genus_abundance <- microbiome::aggregate_taxa(physeq, "Genus") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.)
+
+genus_abundance <- genus_abundance %>%
+  dplyr::group_by(Season, Genus) %>%  # group by only phyla so I can see across sites and season
+  dplyr::summarise(Meanabu = mean(Abundance)) %>%  # Create a column called `Meanabu`
+  dplyr::filter(Meanabu > 0) %>%                  # filter out rows that have 0 abundance
+  dplyr::arrange(desc(Meanabu))
+View(genus_abundance)
+write_csv(genus_abundance, file="genus_abundance.csv")
+
+species_abundance <- microbiome::aggregate_taxa(physeq, "Species") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.)
+
+species_abundance <- species_abundance %>%
+  dplyr::group_by(Season, OTU) %>%  # group by only phyla so I can see across sites and season
+  dplyr::summarise(Meanabu = mean(Abundance)) %>%  # Create a column called `Meanabu`
+  dplyr::filter(Meanabu > 0) %>%                  # filter out rows that have 0 abundance
+  dplyr::arrange(desc(Meanabu))
+View(species_abundance)
+write_csv(species_abundance, file="species_abundance.csv")
+
+
+# differential abundance testing (microeco)
+
+lefse <- trans_diff$new(dataset = test, method = "lefse", group = "Season", alpha = 0.4, p_adjust_method = "fdr")
+lefse$plot_diff_bar(threshold = 4, , width = 0.5)
+lefse$res_diff
+lefse_values <- lefse$res_diff
+write_csv(lefse_values, file="lefse_values.csv")
+# 126 taxa found significant ...
+# After P value adjustment, 0 taxa found significant 
+
+# ANCOMBC
+
+ancombc <- microeco::trans_diff$new(dataset = test, method = "ancombc", group = "Season", alpha = 0.05, p_adjust_method = "fdr")
+ancombc$res_diff
+
+# spearman correlation
+
+pass <- function(x){x}
+
+phylum_data <-  microbiome::aggregate_taxa(physeq, "Phylum") # group at Phyla
+otu <- as.data.frame(otu_table(phylum_data)) # turn into a data frame
+View(otu)
+
+otu <- otu %>% 
+  rownames_to_column(var = "Phylum")
+
+otu <- otu %>%
+  mutate(Phylum = str_replace(Phylum, "p__",""))
+
+mtx <- otu %>%
+  column_to_rownames(var = "Phylum") %>%
+  as.matrix() %>%
+  t() %>%
+  pass
+View(mtx) # should be sample then phyla with sequence freq
+
+RA <- mtx %>% sweep(2, colSums(.), "/") # RA for relative abundance by column 
+RA[1:5, 1:5]
+
+spearCorTest <- corr.test(mtx, method = "spearman", adjust = "none")
+spearCor <- spearCorTest$r
+spearP <- spearCorTest$p
+
+get_lower_tri<-function(cormat){
+  cormat[upper.tri(cormat)] <- NA
+  return(cormat)
+}
+# Get upper triangle of the correlation matrix
+get_upper_tri <- function(cormat){
+  cormat[lower.tri(cormat)]<- NA
+  return(cormat)
+}
+
+reorder_cormat <- function(cormat){
+  # Use correlation between variables as distance
+  dd <- as.dist((1-cormat)/2)
+  hc <- hclust(dd)
+  cormat <-cormat[hc$order, hc$order]
+}
+
+reorder_cor_and_p <- function(cormat, pmat){
+  dd <- as.dist((1-cormat)/2)
+  hc <- hclust(dd)
+  cormat <-cormat[hc$order, hc$order]
+  pmat <- pmat[hc$order, hc$order]
+  list(r = cormat, p = pmat)
+}
+
+## Make sure that the data are ordered so that more related species   are closer together.
+## Also ensure that the p values and correlations are in the same order
+reordered_all <- reorder_cor_and_p(spearCor, spearP)
+reordered_spearCor <- reordered_all$r
+reordered_spearP <- reordered_all$p
+
+## Just take the upper triangle of the correlation matrix, reshape it into a data frame, and improve the names of the variables
+spearCor_processed <- reordered_spearCor  %>% get_upper_tri() %>% reshape2::melt() %>% na.omit() %>% dplyr::rename(rho = value)
+spearP_processed <- reordered_spearP  %>% get_upper_tri() %>% reshape2::melt() %>% na.omit() %>% dplyr::rename(p = value)
+
+# join the correlation and pvalue data frames
+spearRhoP <- left_join(spearCor_processed, spearP_processed, by = c("Var1", "Var2")) %>%
+  # calculate the false discovery rate to adjust for multiple p values
+  mutate(fdr = p.adjust(p, method = "BH"))
+
+spearRhoP
+write_csv(spearRhoP, file = "spearRhoP.csv")
+
+# Identify which pairs are "statistically significant, given our fdr threshold"
+fdrThresh <- 0.05 # fdr threshold
+spearOkP <- spearRhoP%>% filter(fdr < fdrThresh) 
+
+spearRhoP_plot <- spearRhoP %>% ggplot(aes(x = Var2, y = Var1, fill = rho)) + geom_tile() + scale_fill_gradient2() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(data = spearOkP, shape = 1)
+spearRhoP_plot # circles indicates statistical significance
+
+mtrclr <- clr(mtx) # 
+
+spearCorTestClr <- corr.test(mtrclr, method = "spearman", adjust = "none")
+spearCorClr <- spearCorTestClr$r
+spearPClr <- spearCorTestClr$p
+
+reordered_all_Clr <- reorder_cor_and_p(spearCorClr, spearPClr)
+reordered_spearCor_Clr <- reordered_all_Clr$r
+reordered_spearP_Clr <- reordered_all_Clr$p
+
+
+spearCor_processed_Clr <- reordered_spearCor_Clr  %>% get_upper_tri() %>% reshape2::melt() %>% na.omit() %>% rename(rho = value)
+spearP_processed_Clr <- reordered_spearP_Clr  %>% get_upper_tri() %>% reshape2::melt() %>% na.omit() %>% rename(p = value)
+
+# join the two data frames
+
+spearRhoP_Clr <- left_join(spearCor_processed_Clr, spearP_processed_Clr, by = c("Var1", "Var2")) %>%
+  # # remove self correlations
+  # filter(Var1 != Var2) %>% 
+  # calculate the false discovery rate to adjust for multiple p values
+  mutate(fdr = p.adjust(p, method = "BH"))
+
+spearOkP_Clr <- spearRhoP_Clr%>% filter(fdr < fdrThresh) 
+
+spearRhoPClr_plot <- spearRhoP_Clr %>% ggplot(aes(x = Var2, y = Var1, fill = rho)) + geom_tile() + scale_fill_gradient2() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(data = spearOkP_Clr, shape = 1)
+
+
+write_csv(spearRhoP_Clr, file = "spearRhoPClr.csv")
+spearRhoPClr_plot # spearmean correlation plot but with log transformed data
+
+mtx %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = "Sample")%>% 
+  write_csv(file = "mtx.csv")
+
+# overlapping ASVs
+
+fall <- subset_samples(physeq, Season == "Fall")
+winter <- subset_samples(physeq, Season == "Winter")
+spring <- subset_samples(physeq, Season == "Spring")
+
+fall<- prune_taxa(taxa_sums(fall) > 0, fall)
+winter<- prune_taxa(taxa_sums(winter) > 0, winter)
+spring<- prune_taxa(taxa_sums(spring) > 0, spring)
+
+
+
+length(taxa_names(fall))
+# 503
+length(taxa_names(winter))
+# 281
+length(taxa_names(spring))
+# 390
+
+# all of these equal the venn diagram! :)
+
+length(intersect(taxa_names(fall), taxa_names(winter)))
+# 21 
+length(intersect(taxa_names(fall), taxa_names(spring)))
+# 59 
+length(intersect(taxa_names(winter), taxa_names(spring)))
+# 11
+
+# all of these equal the venn diagram! :)
+
+asv_list <- intersect(taxa_names(fall), taxa_names(winter))
+taxa_sub <- physeq@tax_table[rownames(physeq@tax_table) %in% asv_list, ]
+write.csv(intersect(taxa_names(fall), taxa_names(winter)), "shared_asvs_fall_winter.csv")
+write.csv(taxa_sub, file = "shared_asvs_fall_winter_list.csv")
+
+asv_list <- intersect(taxa_names(fall), taxa_names(spring))
+taxa_sub <- physeq@tax_table[rownames(physeq@tax_table) %in% asv_list, ]
+write.csv(intersect(taxa_names(fall), taxa_names(spring)), "shared_asvs_fall_spring.csv")
+write.csv(taxa_sub, file = "shared_asvs_fall_spring_list.csv")
+
+asv_list <- intersect(taxa_names(winter), taxa_names(spring))
+taxa_sub <- physeq@tax_table[rownames(physeq@tax_table) %in% asv_list, ]
+write.csv(intersect(taxa_names(winter), taxa_names(spring)), "shared_asvs_winter_spring.csv")
+write.csv(taxa_sub, file = "shared_asvs_winter_spring_list.csv")
+
+
+ps.genus <- subset_taxa(physeq, Genus != "g__") # only keep taxa that are assigned at the genus level
+view <- psmelt(ps.genus)
+num <- sum(view$Abundance)
+print(num) #26879 sequences
+
+view <- psmelt(physeq)
+num <- sum(view$Abundance)
+print(num) #50950 
+
+# lost 24,071 sequences when grouped at genera for venn diagram 
+
+# bar plot with only genera
+
+ps.genus <- subset_taxa(physeq, Genus != "g__")
+df <- sample_data(ps.genus) # check sample names
+
+order_szn <- c("Fall","Winter","Spring")
+df$Season <- factor(df$Season, levels = order_szn)
+sample_data(ps.genus) <- df
+
+names <- rownames(ps.genus@tax_table)
+
+ps.genus <- ps_prune(ps.genus, min.reads = 75)
+taxa_data <-  microbiome::aggregate_taxa(ps.genus, "Genus") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+taxa_data <- taxa_data %>%
+  mutate(OTU = str_replace(OTU, "p__", ""),
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""),
+         Family = str_replace(Family, "f__",""),
+         Genus = str_replace(Genus, "g__",""),
+         unique = str_replace(unique, "g__",""))
+View(taxa_data)
+
+order <- taxa_data$Genus %>% unique()
+
+taxa_data$Genus <- factor(taxa_data$Genus, levels = order)
+
+taxa_data$Genus <- fct_relevel(taxa_data$Genus, "Unknown", after = Inf)
+#taxa_data$Phylum <- fct_relevel(taxa_data$Phylum, "Ciliophora", after = 3)
+#taxa_data$Phylum <- fct_relevel(taxa_data$Phylum, "Cryptophyceae", after = 2)
+
+p_col <- c(
+  "olivedrab", "chartreuse4","darkseagreen","darkslategray3","cyan3", "darkcyan", "dodgerblue",
+  "palegoldenrod", "darkgoldenrod1", "darkorange2",
+  "darksalmon", "tomato2",
+  "deeppink4", "darkmagenta","darkorchid",      
+  "darkslateblue", "brown4",
+  "azure4")
+
+
+bar <- taxa_data %>%
+  ggbarplot( x= "Site", 
+             y = "Abundance", # sequence abundance 
+             fill = "Genus",
+             position = position_stack(),
+             legend = "right",
+             ylab = "Relative Abundances") +
+  ggtitle("Relative Abundance of Phyla Across Season") +
+  #scale_fill_manual(values = p_col) + 
+  scale_y_continuous(expand = c(0, .01)) +
+  facet_grid(cols = vars(Season),     # create facets by factors in column `Location`.
+             scales = "free_x",
+             space = "free_x") +
+  guides(fill = guide_legend(byrow = FALSE)) + 
+  rotate_x_text(angle = 45) +           # rotate the x-axis labels
+  theme_bw() +                          # makes ggplots look better
+  theme(axis.title.x=element_blank(),   # remove the background grid
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+bar
+
+taxa_abund <- taxa_data %>%
+  dplyr::group_by(Season, Genus) %>% # groups everything by Season and Phylum 
+  dplyr::summarise(Abundance = mean(Abundance, na.rm = TRUE), # then sums them
+                   .groups = "drop"
+  )
+View(taxa_abund)
+write_csv(taxa_abund, file = "genus_abundance.csv")
+
+# ochrophyta comparison
+
+ochro <- subset_taxa(physeq, Phylum == "p__Ochrophyta")
+
+names <- rownames(ochro@tax_table)
+
+ochro_data <-  microbiome::aggregate_taxa(ochro, "Species") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+ochro_data <- ochro_data %>%
+  mutate(OTU = str_replace(OTU, "p__", ""),
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""),
+         Family = str_replace(Family, "f__",""),
+         Genus = str_replace(Genus, "g__",""),
+         unique = str_replace(unique, "g__",""))
+View(ochro_data)
+
+#chlorophyta dive
+
+green <- subset_taxa(physeq, Phylum == "p__Chlorophyta")
+
+names <- rownames(green@tax_table)
+
+green_data <-  microbiome::aggregate_taxa(green, "Genus") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+green_data <- green_data %>%
+  mutate(OTU = str_replace(OTU, "p__", ""),
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""),
+         Family = str_replace(Family, "f__",""),
+         Genus = str_replace(Genus, "g__",""),
+         unique = str_replace(unique, "g__",""))
+View(green_data)
+
+#dinoflag dive
+
+dino <- subset_taxa(physeq, Phylum == "p__Dinoflagellata")
+
+names <- rownames(dino@tax_table)
+
+dino_data <-  microbiome::aggregate_taxa(dino, "Species") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+dino_data <- dino_data %>%
+  mutate(OTU = str_replace_all(OTU, "[a-z]__", ""), # str_replace_all does everything in each cell, and [a-z] does any letter
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""),
+         Family = str_replace(Family, "f__",""),
+         Genus = str_replace(Genus, "g__",""),
+         unique = str_replace(unique, "g__",""))
+View(dino_data)
+
+#diatom dive
+
+diatom <- subset_taxa(physeq, Phylum == "p__Diatomea")
+
+names <- rownames(diatom@tax_table)
+
+diatom_data <-  microbiome::aggregate_taxa(diatom, "Genus") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+diatom_data <- diatom_data %>%
+  mutate(OTU = str_replace_all(OTU, "[a-z]__", ""), # str_replace_all does everything in each cell, and [a-z] does any letter
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""),
+         Family = str_replace(Family, "f__",""),
+         Genus = str_replace(Genus, "g__",""),
+         unique = str_replace(unique, "g__",""))
+diatom_data <- diatom_data %>%
+  mutate(body_plan = case_when(
+    str_detect(OTU, "Skeletonema") ~ "centric",  
+    str_detect(OTU, "Thalassiosira") ~ "centric",
+    str_detect(OTU, "Navicula") ~ "pennate",
+    str_detect(OTU, "Chaetoceros") ~ "centric",
+    str_detect(OTU, "Cyclotella") ~ "centric",
+    str_detect(OTU, "Minutocellus") ~ "centric",
+    str_detect(OTU, "Eucampia") ~ "centric",
+    str_detect(OTU, "Haslea") ~ "pennate",
+    str_detect(OTU, "Rhizosolenids") ~ "centric",
+    str_detect(OTU, "Nitzschia") ~ "pennate",
+    str_detect(OTU, "Sellaphora") ~ "pennate",
+    str_detect(OTU, "Entomoneis") ~ "pennate",
+    str_detect(OTU, "Leptocylindrus") ~ "centric",
+    str_detect(OTU, "Melosira") ~ "centric",
+    str_detect(OTU, "Pseudo-nitzschia") ~ "pennate",
+    str_detect(OTU, "Coscinodiscus") ~ "centric")) %>% 
+    relocate(body_plan, .after = OTU)
+View(diatom_data)
+      
+diatom_data %>% 
+  filter(!is.na(body_plan)) %>% # exlude any rows with na in the weight column
+  group_by(Season, body_plan) %>% 
+  summarize(sum = sum(Abundance, na.rm = T))
+      
+      
+diatom_data <- diatom_data %>% 
+  mutate(percent = Abundance*100) %>% 
+  relocate(percent, .after = Abundance) %>% 
+  relocate(Genus, .after = percent)
+View(diatom_data)
+
+#ciliate dive
+
+cili <- subset_taxa(physeq, Phylum == "p__Ciliophora")
+
+names <- rownames(cili@tax_table)
+
+cili_data <-  microbiome::aggregate_taxa(cili, "Genus") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+cili_data <- cili_data %>%
+  mutate(OTU = str_replace_all(OTU, "[a-z]__", ""), # str_replace_all does everything in each cell, and [a-z] does any letter
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""),
+         Family = str_replace(Family, "f__",""),
+         Genus = str_replace(Genus, "g__",""),
+         unique = str_replace(unique, "g__",""))
+         
+cili_data <- filter(cili_data, Abundance > 0)
+View(cili_data)
+
+#cercozoa dive
+
+cerco <- subset_taxa(physeq, Phylum == "p__Cercozoa")
+
+names <- rownames(cerco@tax_table)
+
+cerco_data <-  microbiome::aggregate_taxa(cerco, "Genus") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+cerco_data <- cerco_data %>%
+  mutate(OTU = str_replace_all(OTU, "[a-z]__", ""), # str_replace_all does everything in each cell, and [a-z] does any letter
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""),
+         Family = str_replace(Family, "f__",""),
+         Genus = str_replace(Genus, "g__",""),
+         unique = str_replace(unique, "g__",""))
+View(cerco_data)
+
+#rotifera dive
+
+roti <- subset_taxa(physeq, Phylum == "p__Rotifera")
+
+names <- rownames(roti@tax_table)
+
+ntaxa(roti)
+
+
+roti_data <-  microbiome::aggregate_taxa(roti, "Genus") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+roti_data <- roti_data %>%
+  mutate(OTU = str_replace_all(OTU, "[a-z]__", ""), # str_replace_all does everything in each cell, and [a-z] does any letter
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""),
+         Family = str_replace(Family, "f__",""),
+         Genus = str_replace(Genus, "g__",""),
+         unique = str_replace(unique, "g__",""))
+View(roti_data)
+
+#arthropoda dive
+
+copepods <- subset_taxa(physeq, Phylum == "p__Arthropoda")
+
+
+names <- rownames(copepods@tax_table)
+
+copepods_data <-  microbiome::aggregate_taxa(copepods, "Species") %>%
+  microbiome::transform(., "compositional") %>%
+  phyloseq::psmelt(.) # extracts abundances and related metadata into a dataframe 
+
+copepods_data <- copepods_data %>%
+  mutate(OTU = str_replace_all(OTU, "[a-z]__", ""), # str_replace_all does everything in each cell, and [a-z] does any letter
+         Kingdom = str_replace(Kingdom, "k__",""),
+         Phylum = str_replace(Phylum, "p__",""),
+         Class = str_replace(Class, "c__",""),
+         Order = str_replace(Order, "o__",""),
+         Family = str_replace(Family, "f__",""),
+         Genus = str_replace(Genus, "g__",""),
+         unique = str_replace(unique, "g__",""))
+View(copepods_data)
+
+# biotech identification
+
+biotech <- microbiome::transform(physeq, "compositional") %>%
+  phyloseq::psmelt(.)
+
+biotech <- biotech %>% 
+  mutate(percent = Abundance*100) %>% 
+  relocate(percent, .after = Abundance) %>% 
+  relocate(Species, .after = percent)
+
+View(biotech)
+
+
+# Navicula arenaria (diatom), Thalassiosira_pseudonana (diatom) 
+# Skeletonema costatum (diatom), Chaetoceros calcitrans (diatom)
+
+biotech_interest <- filter(biotech, Species %in% c("s__Chaetoceros_calcitrans", "s__Navicula_arenaria", "s__Thalassiosira_pseudonana", "s__Skeletonema_costatum"))
+biotech_interest <- filter(biotech_interest, Abundance > 0)
+View(biotech_interest)
+
+biotech_interest <- biotech_interest %>%
+  mutate(Abundance = as.numeric(Abundance)) %>%
+  mutate(Species = as.character(Species)) %>%
+  arrange(biotech_interest,desc(Species))
+
+
+# frequencies
+
+seq_table <- data.frame(otu_table(physeq))
+seq_table <- as.data.frame(seq_table)
+seq_table <- seq_table[rowSums(seq_table) > 0, ]
+View(seq_table)
+
+taxon_table <- data.frame(tax_table(physeq))
+
+View(taxon_table)
+View(seq_table)
+
+summary_tax <- merge(seq_table, taxon_table,
+                     by = "row.names",
+                     all = FALSE)
+View(summary_tax)
+
+summary_tax <- summary_tax %>%
+  rename(seq_id=Row.names)
+
+freq_asv <- summary_tax %>%
+  dplyr::group_by(Phylum, Class, Order, Family, Genus, Species) %>% 
+  dplyr::summarise(Count = n(), .groups = 'drop') # counts how many of the "group" there are
+write.csv(freq_asv, file = "freq_all_asv.csv")
+print(freq_asv) 
+
