@@ -1,0 +1,12 @@
+library(microeco)
+library(qiime2R) 
+library(phyloseq)
+library(dplyr)
+library(vegan)
+library(tidyverse)
+library(file2meco)
+
+# use phyloseq object
+
+meco <- phyloseq2meco(physeq)
+print(meco)
