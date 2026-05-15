@@ -3,7 +3,7 @@ Based on Wright Labs workshop 05/12/2025 and 05/13/2025
 1.0 Set Up
 
 # creating a working directory folder
-# create a folder called raw_data
+# create a folder called raw_data in working directory
 # move all fastq.gz / .fastq files into the raw_data folder
 
 #### activate qiime2 ####
