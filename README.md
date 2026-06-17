@@ -1,2 +1,2 @@
 # eDNA-QIIME2-Workflow
-Sediment and water environmental DNA workflows in QIIME2, Mothur, and R. All workflows are created and owned by Mainly Microbe and Zuri M
+Sediment and water environmental DNA workflows in QIIME2, Mothur, and R. All workflows are created and owned by JS Pinelo and Zuri M
